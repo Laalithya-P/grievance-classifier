@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔍 Grievance Search</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1f77b4;
+            border-bottom: 3px solid #1f77b4;
+            padding-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .search-box input {
+            flex: 1;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        .search-box button {
+            padding: 12px 30px;
+            background: #1f77b4;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .search-box button:hover {
+            background: #1565a0;
+        }
+        .settings {
+            margin: 15px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        .settings label {
+            display: inline-block;
+            margin-right: 30px;
+            margin-bottom: 10px;
+        }
+        .settings input[type="range"] {
+            width: 150px;
+            margin: 0 10px;
+            vertical-align: middle;
+        }
+        .settings .value {
+            font-weight: bold;
+            color: #1f77b4;
+            min-width: 35px;
+            display: inline-block;
+        }
+        .result {
+            background: #f0f2f6;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 5px solid #1f77b4;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .score {
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .score-high { color: #2ecc71; }
+        .score-medium { color: #f39c12; }
+        .score-low { color: #e74c3c; }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        .error {
+            color: #e74c3c;
+            background: #fde8e8;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .stats {
+            color: #666;
+            font-size: 14px;
+            margin-top: 20px;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        .no-results {
+            color: #999;
+            font-style: italic;
+        }
+        .result-detail {
+            margin: 3px 0;
+        }
+        .result-detail strong {
+            color: #333;
+        }
+        details {
+            margin-top: 10px;
+        }
+        details summary {
+            cursor: pointer;
+            color: #1f77b4;
+        }
+        details p {
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+        }
+        .exit-hint {
+            color: #999;
+            font-size: 12px;
+            margin-top: 10px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Grievance Search System</h1>
+        <p class="subtitle">🤖 iPGRS AI Assistant - Find similar grievances using semantic search</p>
+        
+        <div id="status" class="stats">
+            ⏳ Loading system...
+        </div>
+        
+        <div class="search-box">
+            <input type="text" id="query" placeholder="📝 Enter Grievance Description..." />
+            <button onclick="searchGrievance()">🔍 Search</button>
+        </div>
+        
+        <div class="settings">
+            <label>
+                Confidence Threshold:
+                <span class="value" id="threshold-value">0.60</span>
+                <input type="range" id="threshold" value="0.6" step="0.05" min="0" max="1" 
+                       oninput="document.getElementById('threshold-value').textContent = parseFloat(this.value).toFixed(2)" />
+            </label>
+            <label>
+                Top K Results:
+                <span class="value" id="topk-value">5</span>
+                <input type="range" id="top_k" value="5" step="1" min="1" max="10" 
+                       oninput="document.getElementById('topk-value').textContent = this.value" />
+            </label>
+        </div>
+        
+        <div id="results">
+            <p class="loading">Enter a query to start searching...</p>
+        </div>
+        
+        <div id="stats" class="stats">
+            Ready to search!
+        </div>
+        
+        <div class="exit-hint">Type "exit" or "quit" in the search box to stop</div>
+    </div>
+    
+    <script>
+        window.onload = function() {
+            checkStatus();
+            document.getElementById('query').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    searchGrievance();
+                }
+            });
+        };
+        
+        function checkStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.ready) {
+                        document.getElementById('status').innerHTML = 
+                            '✅ System ready! ' + data.records + ' records loaded on ' + data.device.toUpperCase();
+                    } else {
+                        document.getElementById('status').innerHTML = 
+                            '⏳ System is loading... Please wait a moment.';
+                        setTimeout(checkStatus, 3000);
+                    }
+                })
+                .catch(() => {
+                    setTimeout(checkStatus, 3000);
+                });
+        }
+        
+        function searchGrievance() {
+            const query = document.getElementById('query').value;
+            const threshold = document.getElementById('threshold').value;
+            const top_k = document.getElementById('top_k').value;
+            
+            // Check for exit command (matches Cell 3 logic)
+            if (query.toLowerCase() === 'exit' || query.toLowerCase() === 'quit') {
+                document.getElementById('results').innerHTML = 
+                    '<p class="loading">👋 Shutting down... Goodbye!</p>';
+                setTimeout(() => {
+                    window.close();
+                }, 1000);
+                return;
+            }
+            
+            if (query.trim().length < 2) {
+                document.getElementById('results').innerHTML = 
+                    '<p class="error">⚠️ Please provide a more detailed description (at least 2-3 words).</p>';
+                return;
+            }
+            
+            document.getElementById('results').innerHTML = 
+                '<p class="loading">🔍 Searching...</p>';
+            
+            const formData = new FormData();
+            formData.append('query', query);
+            formData.append('threshold', threshold);
+            formData.append('top_k', top_k);
+            
+            fetch('/search', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('results').innerHTML = 
+                        '<p class="error">❌ ' + data.error + '</p>';
+                    return;
+                }
+                
+                if (data.results.length === 0) {
+                    document.getElementById('results').innerHTML = 
+                        '<p class="no-results">⚠️ No confident match. Try describing the issue more clearly or lower the threshold.</p>';
+                    document.getElementById('stats').innerHTML = 
+                        'Found 0 results for "' + data.query + '"';
+                    return;
+                }
+                
+                let html = '';
+                data.results.forEach((r, i) => {
+                    let scoreClass = 'score-low';
+                    if (r.score >= 70) scoreClass = 'score-high';
+                    else if (r.score >= 50) scoreClass = 'score-medium';
+                    
+                    html += `
+                        <div class="result">
+                            <div class="result-header">
+                                <strong>Result #${i+1}</strong>
+                                <span class="score ${scoreClass}">${r.score}% Confidence</span>
+                            </div>
+                            <div class="result-detail"><strong>📍 Dept:</strong> ${r.dept || 'N/A'}</div>
+                            <div class="result-detail"><strong>📍 Line Dept:</strong> ${r.line_dept || 'N/A'}</div>
+                            <div class="result-detail"><strong>📍 Service:</strong> ${r.service || 'N/A'}</div>
+                            <div class="result-detail"><strong>📍 Grievance:</strong> ${r.grievance || 'N/A'}</div>
+                            <details>
+                                <summary>🔍 View Full Description</summary>
+                                <p>${r.description}</p>
+                            </details>
+                        </div>
+                    `;
+                });
+                
+                document.getElementById('results').innerHTML = html;
+                document.getElementById('stats').innerHTML = 
+                    'Found ' + data.count + ' results for "' + data.query + '"';
+            })
+            .catch(error => {
+                document.getElementById('results').innerHTML = 
+                    '<p class="error">❌ Error: ' + error.message + '</p>';
+            });
+        }
+    </script>
+</body>
+</html>
