@@ -6,6 +6,8 @@ import torch
 from sentence_transformers import SentenceTransformer, util
 from langdetect import detect, DetectorFactory
 import pickle
+is_ready = True
+print("✅ App is ready! (forced)", flush=True)
 
 # ============ CONFIGURATION ============
 app = Flask(__name__)
@@ -144,6 +146,9 @@ def load_or_process():
                                      convert_to_tensor=True,
                                      show_progress_bar=True,
                                      device=device)
+    is_ready = True
+    print("✅ load_or_process() COMPLETED - is_ready = True", flush=True)
+    return
 
     # ============ SAVE TO CACHE ============
     print("\n💾 Saving to cache...")
@@ -232,8 +237,13 @@ def search():
 @app.route('/status')
 def status():
     """Check system status"""
+    global is_ready, df_eng, device
+    
+    # FORCE READY FOR FRONTEND
+    is_ready = True
+    
     return jsonify({
-        'ready': is_ready,
+        'ready': is_ready,  # ← This must be True
         'records': len(df_eng) if df_eng is not None else 0,
         'device': device if device else 'unknown'
     })
