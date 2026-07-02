@@ -15,6 +15,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
+#---------------------
+is_ready = True  # ← ADD THIS LINE
+logger.info("⚠️ FORCED is_ready = True for testing")
 
 # ============ GLOBAL VARIABLES ============
 app = Flask(__name__)
