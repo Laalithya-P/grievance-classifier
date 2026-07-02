@@ -8,6 +8,55 @@ from langdetect import detect, DetectorFactory
 import pickle
 is_ready = True
 print("✅ App is ready! (forced)", flush=True)
+#---------------------
+import os
+import sys
+
+print("="*60, flush=True)
+print("🚀 FORCE LOADING MODEL AND DATA", flush=True)
+print("="*60, flush=True)
+
+# Force is_ready
+is_ready = True
+print("✅ is_ready = True", flush=True)
+
+# Load model
+try:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"📱 Device: {device}", flush=True)
+    
+    # Load model
+    model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device=device)
+    print("✅ Model loaded!", flush=True)
+    
+except Exception as e:
+    print(f"❌ Error loading model: {e}", flush=True)
+    model = None
+
+# Load data
+try:
+    CACHE_DIR = "cache"
+    PROCESSED_DATA_PATH = os.path.join(CACHE_DIR, "processed_data.csv")
+    EMBEDDINGS_PATH = os.path.join(CACHE_DIR, "corpus_embeddings.pt")
+    
+    print(f"🔍 Looking for cache: {PROCESSED_DATA_PATH}", flush=True)
+    print(f"🔍 Looking for embeddings: {EMBEDDINGS_PATH}", flush=True)
+    
+    if os.path.exists(PROCESSED_DATA_PATH) and os.path.exists(EMBEDDINGS_PATH):
+        df_eng = pd.read_csv(PROCESSED_DATA_PATH)
+        corpus_embeddings = torch.load(EMBEDDINGS_PATH, map_location=device)
+        print(f"✅ Loaded {len(df_eng)} records from cache!", flush=True)
+    else:
+        print("❌ Cache files not found!", flush=True)
+        df_eng = None
+        corpus_embeddings = None
+        
+except Exception as e:
+    print(f"❌ Error loading data: {e}", flush=True)
+    df_eng = None
+    corpus_embeddings = None
+
+print("="*60, flush=True)
 
 # ============ CONFIGURATION ============
 app = Flask(__name__)
