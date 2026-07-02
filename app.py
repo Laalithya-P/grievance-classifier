@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer, util
 from langdetect import detect, DetectorFactory
 import sys
 import logging
+import gc
 
 # ============ LOGGING ============
 logging.basicConfig(
@@ -15,8 +16,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
-#---------------------
-is_ready = True  # ← ADD THIS LINE
+
+# ============ FORCE READY ============
+is_ready = True
 logger.info("⚠️ FORCED is_ready = True for testing")
 
 # ============ GLOBAL VARIABLES ============
@@ -30,7 +32,7 @@ model = None
 df_eng = None
 corpus_embeddings = None
 device = None
-is_ready = False
+# is_ready is already set to True above
 
 # ============ LOAD MODEL ONCE ============
 def load_model():
@@ -45,9 +47,9 @@ def load_model():
     logger.info(f"📱 Device: {device}")
     
     try:
-        model = SentenceTransformer('all-MiniLM-L6-v2', device=device)
-        model = model.half()  # FP16 for memory efficiency
-        logger.info("✅ Model loaded with FP16!")
+        # Use the multilingual model for better results
+        model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device=device)
+        logger.info("✅ Model loaded with full precision!")
         return model
     except Exception as e:
         logger.error(f"❌ Error loading model: {e}")
@@ -56,11 +58,11 @@ def load_model():
 
 # ============ LOAD OR PROCESS DATA ============
 def load_or_process():
-    """Load from cache or process from scratch"""
+    """Load from cache or process from scratch - ALL DATA"""
     global model, df_eng, corpus_embeddings, device, is_ready
     
     logger.info("="*60)
-    logger.info("🚀 LOAD_OR_PROCESS STARTED")
+    logger.info("🚀 LOAD_OR_PROCESS STARTED (ALL DATA)")
     logger.info("="*60)
     
     # Load model first
@@ -110,7 +112,7 @@ def load_or_process():
         except:
             return True
 
-    # 2. Read and Combine Sheets
+    # 2. Read ALL Sheets
     excel_file = "Raw Data.xlsx"
 
     if not os.path.exists(excel_file):
@@ -127,30 +129,21 @@ def load_or_process():
     target_departments = ["Home", "Housing", "RDPR", "UDD"]
     all_dfs = []
 
-    # ============ SAMPLE 3,000 ROWS FROM EACH SHEET ============
+    # ============ READ ALL SHEETS ============
     for sheet in sheet_names:
         if any(dept.lower() in sheet.lower() for dept in target_departments) or "master" in sheet.lower():
             logger.info(f"   Reading sheet: {sheet}...")
             temp_df = pd.read_excel(excel_file, sheet_name=sheet)
-            
-            sample_size = 3000
-            if len(temp_df) > sample_size:
-                temp_df = temp_df.sample(n=sample_size, random_state=42)
-                logger.info(f"      ✅ Sampled {sample_size} rows from {sheet}")
-            else:
-                logger.info(f"      ✅ Using all {len(temp_df)} rows from {sheet}")
-            
+            logger.info(f"      ✅ Loaded {len(temp_df)} rows from {sheet}")
             all_dfs.append(temp_df)
 
+    # If no matching sheets found, read ALL sheets
     if not all_dfs:
         logger.warning("⚠️ No matching sheets found. Reading ALL sheets...")
         for sheet in sheet_names:
             logger.info(f"   Reading sheet: {sheet}...")
             temp_df = pd.read_excel(excel_file, sheet_name=sheet)
-            sample_size = 3000
-            if len(temp_df) > sample_size:
-                temp_df = temp_df.sample(n=sample_size, random_state=42)
-                logger.info(f"      ✅ Sampled {sample_size} rows from {sheet}")
+            logger.info(f"      ✅ Loaded {len(temp_df)} rows from {sheet}")
             all_dfs.append(temp_df)
 
     # Create the Master Table
@@ -195,11 +188,13 @@ def load_or_process():
     logger.info(f"🧠 Creating embeddings for {len(df_eng)} records. Please wait...")
     descriptions = df_eng['Grievance Description'].astype(str).tolist()
 
-    corpus_embeddings = model.encode(descriptions,
-                                     convert_to_tensor=True,
-                                     show_progress_bar=True,
-                                     device=device,
-                                     batch_size=32)
+    corpus_embeddings = model.encode(
+        descriptions,
+        convert_to_tensor=True,
+        show_progress_bar=True,
+        device=device,
+        batch_size=64  # Faster on local machine
+    )
 
     # 6. Save to Cache
     logger.info("💾 Saving to cache...")
@@ -221,7 +216,7 @@ def index():
 
 @app.route('/search', methods=['POST'])
 def search():
-    """Search endpoint"""
+    """Search endpoint - ALL DATA"""
     global model, df_eng, corpus_embeddings, device, is_ready
     
     if not is_ready:
@@ -237,6 +232,9 @@ def search():
         
         if len(user_query) < 2:
             return jsonify({'error': 'Please provide at least 2-3 words.'}), 400
+        
+        # Force garbage collection before search
+        gc.collect()
         
         query_emb = model.encode(user_query, convert_to_tensor=True, device=device)
         hits = util.semantic_search(query_emb, corpus_embeddings, top_k=top_k)
@@ -275,6 +273,13 @@ def search():
                     'score_raw': float(score)
                 })
         
+        # ============ MEMORY CLEANUP ============
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info(f"✅ Search completed: {len(results)} results")
+        # ========================================
+        
         return jsonify({
             'results': results,
             'count': len(results),
@@ -294,23 +299,20 @@ def status():
         'records': len(df_eng) if df_eng is not None else 0,
         'device': device if device else 'unknown'
     })
+
+# ============ FORCE LOAD AT MODULE LEVEL ============
 logger.info("🚀 FORCE LOADING at module level...")
 load_or_process()
 logger.info("✅ load_or_process() completed at module level")
 
 # ============ MAIN ============
 if __name__ == '__main__':
-    #load_or_process()
+    port = int(os.environ.get('PORT', 5001))
+    logger.info("="*60)
+    logger.info("🤖 iPGRS AI Assistant is Online.")
+    logger.info(f"📍 Open http://127.0.0.1:{port} in your browser")
+    logger.info("="*60)
+    logger.info(f"🔌 Running on port: {port}")
+    logger.info("="*60)
     
-    if is_ready:
-        port = int(os.environ.get('PORT', 5001))
-        logger.info("="*60)
-        logger.info("🤖 iPGRS AI Assistant is Online.")
-        logger.info(f"📍 Open http://127.0.0.1:{port} in your browser")
-        logger.info("="*60)
-        logger.info(f"🔌 Running on port: {port}")
-        logger.info("="*60)
-        
-        app.run(debug=False, host='0.0.0.0', port=port)
-    else:
-        logger.error("❌ Failed to load data. Please check your Excel file.")
+    app.run(debug=False, host='0.0.0.0', port=port)
