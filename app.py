@@ -44,14 +44,13 @@ def load_or_process():
         print("\n✅ DATABASE READY! You can now search.")
         return
     
-    # ============ PROCESS FROM SCRATCH (EXACT COLAB CODE) ============
+    # ============ PROCESS FROM SCRATCH ============
     print("\n🔄 No cache found. Running Cell 2 processing...")
     print("="*60)
     
-    # Ensures language detection stays consistent
     DetectorFactory.seed = 0
 
-    # 1. Load the Multilingual Model (Optimized for Colab GPU)
+    # 1. Load the Model
     print("🚀 Loading AI Model...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -61,13 +60,10 @@ def load_or_process():
     def clean_metadata(text):
         if pd.isna(text):
             return "N/A"
-        # Take the English part before the '/' split
         first_part = str(text).split('/')[0]
-        # Strip out any hidden Kannada characters left behind
         return re.sub(r'[^\x00-\x7F]+', '', first_part).strip()
 
     def is_english(text):
-        """Filter to ensure the database stays English-only"""
         if pd.isna(text):
             return False
         try:
@@ -78,7 +74,7 @@ def load_or_process():
         except:
             return True
 
-    # 3. Read and Combine Sheets from Raw Data.xlsx
+    # 3. Read and Combine Sheets
     excel_file = "Raw Data.xlsx"
 
     if not os.path.exists(excel_file):
@@ -91,12 +87,10 @@ def load_or_process():
     sheet_names = excel_reader.sheet_names
     print(f"📋 Found sheets: {sheet_names}")
 
-    # Target departments to combine
     target_departments = ["Home", "Housing", "RDPR", "UDD"]
     all_dfs = []
 
     for sheet in sheet_names:
-        # Check if the sheet matches our targeted departments or a combined master sheet
         if any(dept.lower() in sheet.lower() for dept in target_departments) or "master" in sheet.lower():
             print(f"   Reading sheet: {sheet}...")
             temp_df = pd.read_excel(excel_file, sheet_name=sheet)
@@ -111,9 +105,14 @@ def load_or_process():
     df_master = pd.concat(all_dfs, ignore_index=True)
     print(f"📊 Total raw rows loaded: {len(df_master)}")
 
+    # ============ ADD SAMPLING ============
+    sample_size = 5000  # Adjust as needed
+    if len(df_master) > sample_size:
+        df_master = df_master.sample(n=sample_size, random_state=42)
+        print(f"📊 Using sample of {sample_size} rows", flush=True)
+    # ======================================
+
     print("🧹 Cleaning structural columns...")
-    # ============ DYNAMIC COLUMN DETECTION (FROM COLAB) ============
-    # Standardize fallback to handle variations in sheet exports safely
     dept_col = 'Department' if 'Department' in df_master.columns else ('Column1' if 'Column1' in df_master.columns else None)
     line_col = 'Line Department' if 'Line Department' in df_master.columns else ('Column2' if 'Column2' in df_master.columns else None)
     serv_col = 'Service Name' if 'Service Name' in df_master.columns else ('Column3' if 'Column3' in df_master.columns else None)
@@ -131,7 +130,6 @@ def load_or_process():
 
     print("🔍 Filtering English descriptions...")
     if 'Grievance Description' in df_master.columns:
-        # Filter down to English-only records
         df_eng = df_master[df_master['Grievance Description'].apply(is_english)].copy()
         df_eng = df_eng.dropna(subset=['Grievance Description'])
     else:
@@ -141,23 +139,23 @@ def load_or_process():
     print(f"🧠 Indexing {len(df_eng)} English records. Please wait...")
     descriptions = df_eng['Grievance Description'].astype(str).tolist()
 
-    # Run semantic embedding matrix calculation on GPU/CPU
+    # Run semantic embedding matrix calculation
     corpus_embeddings = model.encode(descriptions,
                                      convert_to_tensor=True,
                                      show_progress_bar=True,
                                      device=device)
-    is_ready = True
-    print("✅ load_or_process() COMPLETED - is_ready = True", flush=True)
-    return
 
     # ============ SAVE TO CACHE ============
     print("\n💾 Saving to cache...")
+    os.makedirs(CACHE_DIR, exist_ok=True)
     df_eng.to_csv(PROCESSED_DATA_PATH, index=False)
     torch.save(corpus_embeddings, EMBEDDINGS_PATH)
     print(f"✅ Saved to {CACHE_DIR}/")
 
     print("\n✅ DATABASE READY! You can now run the Search Cell.")
     is_ready = True
+    print("✅ load_or_process() COMPLETED - is_ready = True", flush=True)
+    return
 
 # ============ FLASK ROUTES ============
 
