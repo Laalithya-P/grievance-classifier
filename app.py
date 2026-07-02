@@ -294,10 +294,13 @@ def status():
         'records': len(df_eng) if df_eng is not None else 0,
         'device': device if device else 'unknown'
     })
+logger.info("🚀 FORCE LOADING at module level...")
+load_or_process()
+logger.info("✅ load_or_process() completed at module level")
 
 # ============ MAIN ============
 if __name__ == '__main__':
-    load_or_process()
+    #load_or_process()
     
     if is_ready:
         port = int(os.environ.get('PORT', 5001))
