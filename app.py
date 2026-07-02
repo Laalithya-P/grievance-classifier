@@ -6,6 +6,15 @@ import torch
 from sentence_transformers import SentenceTransformer, util
 from langdetect import detect, DetectorFactory
 import sys
+import logging
+
+# ============ LOGGING ============
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # ============ GLOBAL VARIABLES ============
 app = Flask(__name__)
@@ -26,18 +35,19 @@ def load_model():
     global model, device
     
     if model is not None:
-        print("✅ Model already loaded", flush=True)
+        logger.info("✅ Model already loaded")
         return model
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"📱 Device: {device}", flush=True)
+    logger.info(f"📱 Device: {device}")
     
     try:
         model = SentenceTransformer('all-MiniLM-L6-v2', device=device)
-        print("✅ Model loaded!", flush=True)
+        model = model.half()  # FP16 for memory efficiency
+        logger.info("✅ Model loaded with FP16!")
         return model
     except Exception as e:
-        print(f"❌ Error loading model: {e}", flush=True)
+        logger.error(f"❌ Error loading model: {e}")
         model = None
         return None
 
@@ -46,9 +56,9 @@ def load_or_process():
     """Load from cache or process from scratch"""
     global model, df_eng, corpus_embeddings, device, is_ready
     
-    print("="*60, flush=True)
-    print("🚀 LOAD_OR_PROCESS STARTED", flush=True)
-    print("="*60, flush=True)
+    logger.info("="*60)
+    logger.info("🚀 LOAD_OR_PROCESS STARTED")
+    logger.info("="*60)
     
     # Load model first
     load_model()
@@ -57,25 +67,25 @@ def load_or_process():
     
     # ============ CHECK CACHE ============
     cache_exists = os.path.exists(PROCESSED_DATA_PATH) and os.path.exists(EMBEDDINGS_PATH)
-    print(f"🔍 Cache exists: {cache_exists}", flush=True)
+    logger.info(f"🔍 Cache exists: {cache_exists}")
     
     if cache_exists:
-        print("\n📂 Loading from cache...")
+        logger.info("📂 Loading from cache...")
         try:
             df_eng = pd.read_csv(PROCESSED_DATA_PATH)
             corpus_embeddings = torch.load(EMBEDDINGS_PATH, map_location=device)
-            print(f"✅ Loaded {len(df_eng)} English records from cache")
-            print(f"✅ Loaded embeddings")
+            logger.info(f"✅ Loaded {len(df_eng)} English records from cache")
+            logger.info("✅ Loaded embeddings")
             is_ready = True
-            print("\n✅ DATABASE READY! You can now search.")
+            logger.info("✅ DATABASE READY! You can now search.")
             return
         except Exception as e:
-            print(f"❌ Error loading cache: {e}", flush=True)
-            print("🔄 Falling back to processing from scratch...")
+            logger.error(f"❌ Error loading cache: {e}")
+            logger.info("🔄 Falling back to processing from scratch...")
     
     # ============ PROCESS FROM SCRATCH ============
-    print("\n🔄 Processing from scratch...")
-    print("="*60)
+    logger.info("🔄 Processing from scratch...")
+    logger.info("="*60)
     
     DetectorFactory.seed = 0
 
@@ -101,89 +111,87 @@ def load_or_process():
     excel_file = "Raw Data.xlsx"
 
     if not os.path.exists(excel_file):
-        print(f"❌ Error: Could not find '{excel_file}'")
-        print(f"Current directory: {os.getcwd()}")
+        logger.error(f"❌ Error: Could not find '{excel_file}'")
+        logger.info(f"Current directory: {os.getcwd()}")
         is_ready = False
         return
 
-    print(f"📂 Inspecting sheets inside {excel_file}...")
+    logger.info(f"📂 Inspecting sheets inside {excel_file}...")
     excel_reader = pd.ExcelFile(excel_file)
     sheet_names = excel_reader.sheet_names
-    print(f"📋 Found sheets: {sheet_names}")
+    logger.info(f"📋 Found sheets: {sheet_names}")
 
     target_departments = ["Home", "Housing", "RDPR", "UDD"]
     all_dfs = []
 
-    # ============ SAMPLE 5,000 ROWS FROM EACH SHEET ============
+    # ============ SAMPLE 3,000 ROWS FROM EACH SHEET ============
     for sheet in sheet_names:
         if any(dept.lower() in sheet.lower() for dept in target_departments) or "master" in sheet.lower():
-            print(f"   Reading sheet: {sheet}...")
+            logger.info(f"   Reading sheet: {sheet}...")
             temp_df = pd.read_excel(excel_file, sheet_name=sheet)
             
-            # Sample 5,000 from EACH sheet
             sample_size = 3000
             if len(temp_df) > sample_size:
                 temp_df = temp_df.sample(n=sample_size, random_state=42)
-                print(f"      ✅ Sampled {sample_size} rows from {sheet}", flush=True)
+                logger.info(f"      ✅ Sampled {sample_size} rows from {sheet}")
             else:
-                print(f"      ✅ Using all {len(temp_df)} rows from {sheet}", flush=True)
+                logger.info(f"      ✅ Using all {len(temp_df)} rows from {sheet}")
             
             all_dfs.append(temp_df)
 
     if not all_dfs:
-        print("⚠️ No matching sheets found. Reading ALL sheets...")
+        logger.warning("⚠️ No matching sheets found. Reading ALL sheets...")
         for sheet in sheet_names:
-            print(f"   Reading sheet: {sheet}...")
+            logger.info(f"   Reading sheet: {sheet}...")
             temp_df = pd.read_excel(excel_file, sheet_name=sheet)
             sample_size = 3000
             if len(temp_df) > sample_size:
                 temp_df = temp_df.sample(n=sample_size, random_state=42)
-                print(f"      ✅ Sampled {sample_size} rows from {sheet}", flush=True)
+                logger.info(f"      ✅ Sampled {sample_size} rows from {sheet}")
             all_dfs.append(temp_df)
 
     # Create the Master Table
     df_master = pd.concat(all_dfs, ignore_index=True)
-    print(f"📊 Total rows loaded: {len(df_master)}")
+    logger.info(f"📊 Total rows loaded: {len(df_master)}")
     
     # Show department distribution
     if 'Department' in df_master.columns:
-        print("📊 Department distribution:")
-        print(df_master['Department'].value_counts())
+        logger.info("📊 Department distribution:")
+        logger.info(f"\n{df_master['Department'].value_counts()}")
 
     # 3. Clean Columns
-    print("🧹 Cleaning structural columns...")
+    logger.info("🧹 Cleaning structural columns...")
     dept_col = 'Department' if 'Department' in df_master.columns else ('Column1' if 'Column1' in df_master.columns else None)
     line_col = 'Line Department' if 'Line Department' in df_master.columns else ('Column2' if 'Column2' in df_master.columns else None)
     serv_col = 'Service Name' if 'Service Name' in df_master.columns else ('Column3' if 'Column3' in df_master.columns else None)
 
     if dept_col and line_col and serv_col:
-        print(f"   Using columns: Dept='{dept_col}', Line='{line_col}', Service='{serv_col}'")
+        logger.info(f"   Using columns: Dept='{dept_col}', Line='{line_col}', Service='{serv_col}'")
         df_master['Dept_Clean'] = df_master[dept_col].apply(clean_metadata)
         df_master['Line_Dept_Clean'] = df_master[line_col].apply(clean_metadata)
         df_master['Service_Clean'] = df_master[serv_col].apply(clean_metadata)
     else:
-        print("⚠️ Standard metadata columns not found. Skipping metadata cleaning mapping.")
+        logger.warning("⚠️ Standard metadata columns not found. Skipping metadata cleaning mapping.")
 
     if 'Grievance Name' in df_master.columns:
         df_master['Grie_Name_Clean'] = df_master['Grievance Name'].apply(clean_metadata)
 
     # 4. Filter English
-    print("🔍 Filtering English descriptions...")
+    logger.info("🔍 Filtering English descriptions...")
     if 'Grievance Description' in df_master.columns:
         df_eng = df_master[df_master['Grievance Description'].apply(is_english)].copy()
         df_eng = df_eng.dropna(subset=['Grievance Description'])
     else:
-        print("❌ Error: Could not find the 'Grievance Description' column in your data.")
+        logger.error("❌ Error: Could not find the 'Grievance Description' column in your data.")
         is_ready = False
         return
 
-    print(f"✅ After English filter: {len(df_eng)} records")
+    logger.info(f"✅ After English filter: {len(df_eng)} records")
 
     # 5. Create Embeddings
-    print(f"🧠 Creating embeddings for {len(df_eng)} records. Please wait...")
+    logger.info(f"🧠 Creating embeddings for {len(df_eng)} records. Please wait...")
     descriptions = df_eng['Grievance Description'].astype(str).tolist()
 
-    # Use smaller batch size for memory efficiency
     corpus_embeddings = model.encode(descriptions,
                                      convert_to_tensor=True,
                                      show_progress_bar=True,
@@ -191,15 +199,15 @@ def load_or_process():
                                      batch_size=32)
 
     # 6. Save to Cache
-    print("\n💾 Saving to cache...")
+    logger.info("💾 Saving to cache...")
     os.makedirs(CACHE_DIR, exist_ok=True)
     df_eng.to_csv(PROCESSED_DATA_PATH, index=False)
     torch.save(corpus_embeddings, EMBEDDINGS_PATH)
-    print(f"✅ Saved to {CACHE_DIR}/")
+    logger.info(f"✅ Saved to {CACHE_DIR}/")
 
     is_ready = True
-    print("\n✅ DATABASE READY! You can now search.")
-    print("✅ load_or_process() COMPLETED - is_ready = True", flush=True)
+    logger.info("✅ DATABASE READY! You can now search.")
+    logger.info("✅ load_or_process() COMPLETED - is_ready = True")
 
 # ============ FLASK ROUTES ============
 
@@ -227,10 +235,7 @@ def search():
         if len(user_query) < 2:
             return jsonify({'error': 'Please provide at least 2-3 words.'}), 400
         
-        # Encode query
         query_emb = model.encode(user_query, convert_to_tensor=True, device=device)
-        
-        # Search
         hits = util.semantic_search(query_emb, corpus_embeddings, top_k=top_k)
         
         results = []
@@ -241,7 +246,6 @@ def search():
             if score > threshold:
                 match = df_eng.iloc[idx]
                 
-                # Get department from original columns
                 dept = match.get('Department', '')
                 if pd.isna(dept) or str(dept).strip() == '' or dept == 'N/A':
                     dept = match.get('Column1', '')
@@ -275,7 +279,7 @@ def search():
         })
         
     except Exception as e:
-        print(f"❌ Search error: {e}", flush=True)
+        logger.error(f"❌ Search error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/status')
@@ -290,18 +294,17 @@ def status():
 
 # ============ MAIN ============
 if __name__ == '__main__':
-    # Load or process data
     load_or_process()
     
     if is_ready:
         port = int(os.environ.get('PORT', 5001))
-        print("\n" + "="*60)
-        print("🤖 iPGRS AI Assistant is Online.")
-        print(f"📍 Open http://127.0.0.1:{port} in your browser")
-        print("="*60)
-        print(f"🔌 Running on port: {port}")
-        print("="*60 + "\n")
+        logger.info("="*60)
+        logger.info("🤖 iPGRS AI Assistant is Online.")
+        logger.info(f"📍 Open http://127.0.0.1:{port} in your browser")
+        logger.info("="*60)
+        logger.info(f"🔌 Running on port: {port}")
+        logger.info("="*60)
         
         app.run(debug=False, host='0.0.0.0', port=port)
     else:
-        print("❌ Failed to load data. Please check your Excel file.")
+        logger.error("❌ Failed to load data. Please check your Excel file.")
